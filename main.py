@@ -19,9 +19,10 @@ import os
 import tqdm
 import argparse
 from utils import save_images
+import itertools
 
-
-checkpoint_path = os.path.join('checkpoint', 'best_checkpoint.pth.tar')
+checkpoint_liver_path = os.path.join('checkpoint', 'liver_checkpoint.pth.tar')
+checkpoint_lesion_path = os.path.join('checkpoint', 'lesion_checkpoint.pth.tar')
 
 parser = argparse.ArgumentParser(description='TODO')
 #parser.add_argument('--seed', default=0, type=int, metavar='N', help='random seed')
@@ -29,34 +30,14 @@ parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='man
 parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=4, help='Number of epochs to train.')
 #parser.add_argument('--learning_rate', '-lr', type=float, default=5e-5, help='The learning rate.')
-parser.add_argument('--check_point_path', type=str, default=checkpoint_path, help='Path to checkpoint file')
+#parser.add_argument('--check_point_path', type=str, default=checkpoint_path, help='Path to checkpoint file')
 parser.add_argument('--load_model', type=lambda x: (str(x).lower() == 'true'), default=True, help='use pretrained')
 
 args = parser.parse_args()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# # Get a batch of training data
-# inputs, masks = next(iter(dataloaders['train']))
-#
-# print(inputs.shape, masks.shape)
-# for x in [inputs.numpy(), masks.numpy()]:
-#     print(x.min(), x.max(), x.mean(), x.std())
-#
-# plt.imshow(reverse_transform(inputs[3]))
-#
-#
-#
-#
-#
-# model = pytorch_unet.UNet(6)
-# model = model.to(device)
-#
-# summary(model, input_size=(3, 224, 224))
-
-
-import numpy as np
-def calc_loss(pred, target, metrics, bce_weight=0.1):
+def calc_loss(pred, target, metrics, bce_weight=0.5):
     bce = F.binary_cross_entropy_with_logits(pred, target)
 
     pred = torch.sigmoid(pred) #TODO why it is not softmax??
@@ -90,7 +71,7 @@ def vis(pred,file_name):
     save_images(map.unsqueeze(0),file_name)
 
 
-def train_model(model, optimizer, scheduler, dataloaders,required_phanes, num_epochs=25,final_eval = False):
+def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,required_phanes, num_epochs=25,final_eval = False):
     #best_model_wts = copy.deepcopy(model.state_dict())
     best_loss = 1e10
 
@@ -107,16 +88,20 @@ def train_model(model, optimizer, scheduler, dataloaders,required_phanes, num_ep
                 for param_group in optimizer.param_groups:
                     print("LR", param_group['lr'])
 
-                model.train()  # Set model to training mode
+                model_livel.train()  # Set model to training mode
+                model_lesion.train()
             else:
-                model.eval()  # Set model to evaluate mode
+                model_livel.eval()  # Set model to evaluate mode
+                model_lesion.eval()
 
-            metrics = defaultdict(float)
+            metrics_liver = defaultdict(float)
+            metrics_lesion = defaultdict(float)
             epoch_samples = 0
 
-            for i, (inputs, labels) in enumerate( dataloaders[phase]):
+            for i, (inputs, labels_liver,labels_lesion) in enumerate( dataloaders[phase]):
                 inputs = inputs.to(device)
-                labels = labels.to(device)
+                labels_liver = labels_liver.to(device)
+                labels_lesion = labels_lesion.to(device)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -124,12 +109,18 @@ def train_model(model, optimizer, scheduler, dataloaders,required_phanes, num_ep
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    loss = calc_loss(outputs, labels, metrics)
+                    outputs = model_livel(inputs)
+                    loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
+                    outpus_lesion = model_lesion(torch.cat((inputs,outputs),dim=1))
+                    loss_lesion = calc_loss(outpus_lesion, labels_lesion, metrics_lesion)
+                    loss = loss_liver + loss_lesion
 
                     if (final_eval):
-                        vis(outputs[0],str(i) + "_ours_" + ".png")
-                        vis(labels[0],str(i) + "_label" + ".png")
+                        vis(outputs[0],str(i) + "liver_ours_" + ".png")
+                        vis(labels_liver[0],str(i) + "liver_label" + ".png")
+
+                        vis(outpus_lesion[0],str(i) + "lesion_ours_" + ".png")
+                        vis(labels_lesion[0],str(i) + "lesion_label" + ".png")
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -143,10 +134,12 @@ def train_model(model, optimizer, scheduler, dataloaders,required_phanes, num_ep
 
                 if i % 20 == 0:
                     #print("i: ", i,"loss: ", metrics['loss'] / epoch_samples , "Dice: ",  metrics['dice'] / epoch_samples)
-                    print('i: {} loss: {:.4f} dice: {:.4f}'.format(i,metrics['loss'] / epoch_samples,metrics['dice'] / epoch_samples))
+                    print('liver - i: {} loss: {:.4f} dice: {:.4f}'.format(i,metrics_liver['loss'] / epoch_samples,metrics_liver['dice'] / epoch_samples))
+                    print('lesion - i: {} loss: {:.4f} dice: {:.4f}'.format(i, metrics_lesion['loss'] / epoch_samples,metrics_lesion['dice'] / epoch_samples))
 
-            print_metrics(metrics, epoch_samples, phase)
-            epoch_loss = metrics['loss'] / epoch_samples
+            print_metrics(metrics_liver, epoch_samples, phase)
+            print_metrics(metrics_lesion, epoch_samples, phase)
+            epoch_loss = metrics_liver['loss'] / epoch_samples + metrics_lesion['dice'] / epoch_samples
 
 
 
@@ -155,7 +148,8 @@ def train_model(model, optimizer, scheduler, dataloaders,required_phanes, num_ep
                 print("saving best model")
                 best_loss = epoch_loss
                 #best_model_wts = copy.deepcopy(model.state_dict())
-                torch.save({'state_dict': model.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_path)
+                torch.save({'state_dict': model_livel.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_liver_path)
+                torch.save({'state_dict': model_lesion.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_lesion_path)
 
         time_elapsed = time.time() - since
         print('{:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -163,7 +157,7 @@ def train_model(model, optimizer, scheduler, dataloaders,required_phanes, num_ep
 
     # load best model weights
     #model.load_state_dict(best_model_wts)
-    return model
+    #return model
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -171,13 +165,17 @@ print(device)
 
 num_class = 2
 
-model = unet.UNet(num_class).to(device)
+model_livel = unet.UNet(in_cannels=3, n_class=num_class).to(device)
+model_lesion = unet.UNet(in_cannels=5, n_class=num_class).to(device)
 
-checkpoint = torch.load(checkpoint_path)
-model.load_state_dict(checkpoint['state_dict'],strict=True)
+checkpoint_liver = torch.load(checkpoint_liver_path)
+checkpoint_lesion = torch.load(checkpoint_lesion_path)
+
+model_livel.load_state_dict(checkpoint_liver['state_dict'],strict=True)
+model_lesion.load_state_dict(checkpoint_lesion['state_dict'],strict=True)
 
 # Observe that all parameters are being optimized
-optimizer_ft = optim.Adam(model.parameters(), lr=1e-4)
+optimizer_ft = optim.Adam(itertools.chain(model_lesion.parameters(), model_livel.parameters()), lr=1e-4)
 
 exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=25, gamma=0.1)
 
@@ -202,9 +200,9 @@ dataloaders['val'] = val_loader
 #train
 required_phanes = ['train', 'val']
 if (args.start_epoch< args.epochs):
-    model = train_model(model, optimizer_ft, exp_lr_scheduler, dataloaders , required_phanes ,num_epochs=args.epochs - args.start_epoch)
+    train_model(model_livel,model_lesion, optimizer_ft, exp_lr_scheduler, dataloaders , required_phanes ,num_epochs=args.epochs - args.start_epoch)
 
 required_phanes = ['val']
-model = train_model(model, optimizer_ft, exp_lr_scheduler, dataloaders ,required_phanes, num_epochs=1,final_eval = True)
+train_model(model_livel,model_lesion, optimizer_ft, exp_lr_scheduler, dataloaders ,required_phanes, num_epochs=1,final_eval = True)
 
 

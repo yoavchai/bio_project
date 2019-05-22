@@ -46,6 +46,9 @@ class MyDataset(Dataset):
         self.normlize = JointNormailze(means=[0.5, 0.5, 0.5], stds=[1, 1, 1])
         self.to_tensor = JointToTensor()
 
+        self.tensor_rotate = TensorJointRotate()
+        self.tensor_horizontal_flip = TensorJointHorizontalFlip()
+
 
     # Override to give PyTorch access to any image on the dataset
     def __getitem__(self, index):
@@ -56,15 +59,19 @@ class MyDataset(Dataset):
         img = np.transpose(img, (2, 0, 1))
         target = np.transpose(target, (2, 0, 1))
 
+        img, target = self.to_tensor(img, target)
 
         if (self.test == False):
-            img, target = self.horizontal_flip(img,target)
-            img, target = self.vertical_flip(img,target)
+            img, target = self.tensor_rotate(img,target)
+            img, target = self.tensor_horizontal_flip(img,target)
+            #img, target = self.horizontal_flip(img,target)
+            #img, target = self.vertical_flip(img,target)
 
-        img, target = self.to_tensor(img,target)
+
 
         target = target[0,:,:] #all channels should be the same
-        target = torch.stack(((target == 0), (target > 0))).to(dtype=torch.float32)
+        target_liver = torch.stack(((target == 0), (target > 0))).to(dtype=torch.float32)
+        target_lesions = torch.stack(((target == 0), (target > 129))).to(dtype=torch.float32)
 
         #normlize
         img = img / 255
@@ -73,7 +80,7 @@ class MyDataset(Dataset):
 
 
 
-        return img, target
+        return img, target_liver , target_lesions
 
     # Override to give PyTorch size of dataset
     def __len__(self):

@@ -62,6 +62,46 @@ class JointVerticalFlip(object):
             return img[:,::-1,:].copy(), target[:,::-1,:].copy() # F.vflip(img), F.vflip(target)
         return img, target
 
+
+class TensorJointHorizontalFlip(object):
+    """Horizontally flip the given pair of PIL Images randomly with a probability of 0.5."""
+
+    def __call__(self, img, target):
+        """
+        Args:
+            img (PIL Image): Image to be flipped.
+            target (PIL Image): Image to be flipped.
+
+        Returns:
+            PIL Image, PIL Image: Randomly flipped images.
+        """
+        if random.random() < 0.5:
+            return img.flip(2).clone() ,  target.flip(2).clone() # img[:,:,::-1].copy(), target[:,:,::-1].copy() #F.hflip(img), F.hflip(target)
+        return img, target
+
+
+class TensorJointRotate(object):
+    """Horizontally flip the given pair of PIL Images randomly with a probability of 0.5."""
+
+    def __call__(self, img, target):
+        """
+        Args:
+            img (PIL Image): Image to be flipped.
+            target (PIL Image): Image to be flipped.
+
+        Returns:
+            PIL Image, PIL Image: Randomly flipped images.
+        """
+        random_value = random.random()
+        if random_value < 0.25: #no change
+            return img, target
+        elif random_value < 0.5: #90 degress
+            return img.clone().transpose(1, 2)  , target.clone().transpose(1, 2)
+        elif random_value < 0.75: # 180 degress
+            return img.flip(1).clone(), target.flip(1).clone()
+        else: #270 degress
+            return img.clone().transpose(1, 2).flip(2)  , target.clone().transpose(1, 2).flip(2)
+
 class JointNormailze(object):
     """Normalize a tensor image with mean and standard deviation. Given mean: (M1,...,Mn) and std: (S1,..,Sn) for n channels,
     this transform will normalize each channel of the input torch.*Tensor
