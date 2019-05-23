@@ -2,12 +2,23 @@ import torch
 import torch.nn as nn
 
 
-def dice_loss(pred, target, smooth=1.):
+def dice_loss(pred, target, smooth=1.,binary=False):
     pred = pred.contiguous()
     target = target.contiguous()
 
-    intersection = (pred * target).sum(dim=2).sum(dim=2)
+    #pred[:,1]  = (pred[:,1] > pred[:,0]).to(dtype=torch.float32)
+    #pred[:,0] = (pred[:,0] >= pred[:,1]).to(dtype=torch.float32)
 
-    loss = (1 - ((2. * intersection + smooth) / (pred.sum(dim=2).sum(dim=2) + target.sum(dim=2).sum(dim=2) + smooth)))
+    if binary == True:
+        pred  = (pred[:,1] > pred[:,0]).to(dtype=torch.float32) #TODO maybe it is better to set a diff threhold
+        target = (target[:,1] > target[:,0]).to(dtype=torch.float32)
+        intersection = (pred * target).sum(dim=1).sum(dim=1)
+        loss = (1 - ((2. * intersection + smooth) / (pred.sum(dim=1).sum(dim=1) + target.sum(dim=1).sum(dim=1) + smooth)))
+
+    else:
+        intersection = (pred * target).sum(dim=2).sum(dim=2)
+
+        loss = (1 - ((2. * intersection + smooth) / (
+                    pred.sum(dim=2).sum(dim=2) + target.sum(dim=2).sum(dim=2) + smooth)))
 
     return loss.mean()

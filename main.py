@@ -27,7 +27,7 @@ checkpoint_lesion_path = os.path.join('checkpoint', 'lesion_checkpoint.pth.tar')
 parser = argparse.ArgumentParser(description='TODO')
 #parser.add_argument('--seed', default=0, type=int, metavar='N', help='random seed')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
-parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
+parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=4, help='Number of epochs to train.')
 #parser.add_argument('--learning_rate', '-lr', type=float, default=5e-5, help='The learning rate.')
 #parser.add_argument('--check_point_path', type=str, default=checkpoint_path, help='Path to checkpoint file')
@@ -46,7 +46,7 @@ def calc_loss(pred, target, metrics, bce_weight=0.5):
     loss = bce * bce_weight + dice * (1 - bce_weight)
 
     metrics['bce'] += bce.data.cpu().numpy() * target.size(0)
-    metrics['dice'] += dice.data.cpu().numpy() * target.size(0)
+    metrics['dice'] += dice_loss(pred, target,binary=True).data.cpu().numpy() * target.size(0)
     metrics['loss'] += loss.data.cpu().numpy() * target.size(0)
 
     #TODO check it is good
@@ -151,6 +151,9 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
                 torch.save({'state_dict': model_livel.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_liver_path)
                 torch.save({'state_dict': model_lesion.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_lesion_path)
 
+                torch.save({'state_dict': model_livel.state_dict()}, checkpoint_liver_path)
+                torch.save({'state_dict': model_lesion.state_dict()}, checkpoint_lesion_path)
+
         time_elapsed = time.time() - since
         print('{:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val loss: {:4f}'.format(best_loss))
@@ -191,7 +194,7 @@ target_val_list = sorted( glob.glob(os.path.join('data','seg','val') + '/*.png')
 trainset = MyDataset(input_train_list,target_train_list, test=False)
 valset = MyDataset(input_val_list,target_val_list, test=True)
 train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-val_loader = torch.utils.data.DataLoader(dataset=valset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+val_loader = torch.utils.data.DataLoader(dataset=valset, batch_size=1, shuffle=False, num_workers=4)
 
 dataloaders = {}
 dataloaders['train'] = train_loader
