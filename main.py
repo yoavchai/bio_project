@@ -110,9 +110,13 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model_livel(inputs)
-                    loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
-                    outpus_lesion = model_lesion(torch.cat((inputs,outputs),dim=1))
+                    loss_liver = calc_loss(outputs[:,0:2,:,:], labels_liver, metrics_liver)
+                    input_to_lesion  = torch.zeros_like(outputs)
+                    input_to_lesion[:, 2: , :, :] = outputs[:, 2: , :, :].detach()
+                    input_to_lesion[:, 0: 2,:,:] = outputs[:, 0: 2,:,:].detach()
+                    outpus_lesion = model_lesion(torch.cat((inputs,input_to_lesion),dim=1))
                     loss_lesion = calc_loss(outpus_lesion, labels_lesion, metrics_lesion)
+                    #loss_lesion = 0
                     loss = loss_liver + loss_lesion
 
                     if (final_eval):
@@ -168,8 +172,9 @@ print(device)
 
 num_class = 2
 
-model_livel = unet.UNet(in_cannels=3, n_class=num_class).to(device)
-model_lesion = unet.UNet(in_cannels=5, n_class=num_class).to(device)
+extra_channels_first_network = 3
+model_livel = unet.UNet(in_cannels=3, n_class=extra_channels_first_network+num_class).to(device)
+model_lesion = unet.UNet(in_cannels=extra_channels_first_network+5, n_class=num_class).to(device)
 
 checkpoint_liver = torch.load(checkpoint_liver_path)
 checkpoint_lesion = torch.load(checkpoint_lesion_path)
@@ -194,7 +199,7 @@ target_val_list = sorted( glob.glob(os.path.join('data','seg','val') + '/*.png')
 trainset = MyDataset(input_train_list,target_train_list, test=False)
 valset = MyDataset(input_val_list,target_val_list, test=True)
 train_loader = torch.utils.data.DataLoader(dataset=trainset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-val_loader = torch.utils.data.DataLoader(dataset=valset, batch_size=1, shuffle=False, num_workers=4)
+val_loader = torch.utils.data.DataLoader(dataset=valset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
 dataloaders = {}
 dataloaders['train'] = train_loader
