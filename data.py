@@ -71,7 +71,7 @@ class MyDataset(Dataset):
 
         target = target[0,:,:] #all channels should be the same
         target_liver = torch.stack(((target == 0), (target > 0))).to(dtype=torch.float32)
-        target_lesions = torch.stack(((target == 0), (target > 129))).to(dtype=torch.float32)
+        target_lesions = torch.stack(((target <= 129), (target > 129))).to(dtype=torch.float32)
 
         #normlize
         img = img / 255

@@ -67,7 +67,8 @@ def print_metrics(metrics, epoch_samples, phase):
 
 #need to input one image
 def vis(pred,file_name):
-    map = (pred[1] > pred[0]).to(dtype=torch.float32)
+    threshold = -0.1
+    map = (pred[1] + threshold  > pred[0]).to(dtype=torch.float32) #TODO use global threshold
     save_images(map.unsqueeze(0),file_name)
 
 
