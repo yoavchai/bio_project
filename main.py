@@ -18,7 +18,7 @@ import glob
 import os
 import tqdm
 import argparse
-from utils import save_images
+from utils import save_images, save_seg_images
 import itertools
 
 checkpoint_liver_path = os.path.join('checkpoint', 'liver_checkpoint.pth.tar')
@@ -26,7 +26,7 @@ checkpoint_lesion_path = os.path.join('checkpoint', 'lesion_checkpoint.pth.tar')
 
 parser = argparse.ArgumentParser(description='TODO')
 #parser.add_argument('--seed', default=0, type=int, metavar='N', help='random seed')
-parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
+parser.add_argument('--start_epoch', default=200, type=int, metavar='N', help='manual epoch number (useful on restarts)')
 parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=4, help='Number of epochs to train.')
 #parser.add_argument('--learning_rate', '-lr', type=float, default=5e-5, help='The learning rate.')
@@ -70,6 +70,12 @@ def vis(pred,file_name):
     threshold = -0.1
     map = (pred[1] + threshold  > pred[0]).to(dtype=torch.float32) #TODO use global threshold
     save_images(map.unsqueeze(0),file_name)
+
+def vis_seg(input, pred, pred_lesion,file_name):
+    threshold = -0.1
+    map = (pred[1] + threshold  > pred[0]).to(dtype=torch.float32) #TODO use global threshold
+    lesion_map = (pred_lesion[1] + threshold  > pred_lesion[0]).to(dtype=torch.float32) #TODO use global threshold
+    save_seg_images(input, map, lesion_map, file_name)
 
 
 def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,required_phanes, num_epochs=25,final_eval = False):
@@ -124,8 +130,12 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
                         vis(outputs[0],str(i) + "liver_ours_" + ".png")
                         vis(labels_liver[0],str(i) + "liver_label" + ".png")
 
+
                         vis(outpus_lesion[0],str(i) + "lesion_ours_" + ".png")
                         vis(labels_lesion[0],str(i) + "lesion_label" + ".png")
+
+                        vis_seg(inputs[0], labels_liver[0], labels_lesion[0], str(i) + "_seg_label.png")
+                        vis_seg(inputs[0], outputs[0], outpus_lesion[0], str(i) + "_seg_ours.png")
 
                     # backward + optimize only if in training phase
                     if phase == 'train':

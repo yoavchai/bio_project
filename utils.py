@@ -6,6 +6,7 @@ from PIL import Image
 import os
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 
 def save_image(image_numpy, image_path):
     image_pil = Image.fromarray(image_numpy)
@@ -29,8 +30,30 @@ def tensor2im(input_image, imtype=np.uint8):
 def save_images(img, file_name):
     im = tensor2im(img)
     image_name = file_name # '%s_%s.png' % (name, label)
+    if not os.path.isdir('result'):
+        os.makedirs('result')
     save_path = os.path.join('result', image_name)
     save_image(im, save_path)
+
+def save_seg_images(img, map, lesion_map, file_name):
+    # im = tensor2im(img)
+    image_name = file_name # '%s_%s.png' % (name, label)
+    if not os.path.isdir('./result/overlay'):
+        os.makedirs('./result/overlay')
+    save_path = os.path.join('./result/overlay', image_name)
+    map = torch.unsqueeze(map, 2).repeat(1,1,4)
+    map[:,:,1:2] = 0
+    lesion_map = torch.unsqueeze(lesion_map, 2).repeat(1,1,4)
+    lesion_map[:,:,0] = 0
+    lesion_map[:,:,2] = 0
+
+
+    plt.figure()
+    plt.imshow(((img+1)/2).permute(1,2,0).cpu(), interpolation='none')
+    plt.imshow(map.cpu())
+    plt.imshow(lesion_map.cpu())
+    plt.savefig(save_path)
+    plt.clf()
 
 class JointHorizontalFlip(object):
     """Horizontally flip the given pair of PIL Images randomly with a probability of 0.5."""
