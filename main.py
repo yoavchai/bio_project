@@ -4,6 +4,8 @@
 import torch
 import torch.nn as nn
 import unet
+# import unet_stn as unet
+# import unet_deep as unet
 from collections import defaultdict
 import torch.nn.functional as F
 from loss import dice_loss
@@ -16,19 +18,27 @@ import math
 from data import MyDataset
 import glob
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import tqdm
 import argparse
 from utils import save_images, save_seg_images
 import itertools
+from networks import R2AttU_Net , AttU_Net
+import os
+
+from torch.backends import cudnn
+cudnn.benchmark = True
+
+csv_path = os.path.join('checkpoint', 'training_stats.csv')
 
 checkpoint_liver_path = os.path.join('checkpoint', 'liver_checkpoint.pth.tar')
 checkpoint_lesion_path = os.path.join('checkpoint', 'lesion_checkpoint.pth.tar')
 
 parser = argparse.ArgumentParser(description='TODO')
 #parser.add_argument('--seed', default=0, type=int, metavar='N', help='random seed')
-parser.add_argument('--start_epoch', default=200, type=int, metavar='N', help='manual epoch number (useful on restarts)')
+parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
 parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train.')
-parser.add_argument('--batch_size', type=int, default=4, help='Number of epochs to train.')
+parser.add_argument('--batch_size', type=int, default=2, help='Number of epochs to train.')
 #parser.add_argument('--learning_rate', '-lr', type=float, default=5e-5, help='The learning rate.')
 #parser.add_argument('--check_point_path', type=str, default=checkpoint_path, help='Path to checkpoint file')
 parser.add_argument('--load_model', type=lambda x: (str(x).lower() == 'true'), default=True, help='use pretrained')
@@ -105,25 +115,29 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
             metrics_lesion = defaultdict(float)
             epoch_samples = 0
 
-            for i, (inputs, labels_liver,labels_lesion) in enumerate( dataloaders[phase]):
+            for i, (inputs, labels_liver,labels_lesion, image_before, image_after) in enumerate( dataloaders[phase]):
                 inputs = inputs.to(device)
+                image_before = image_before.to(device)
+                image_after = image_after.to(device)
                 labels_liver = labels_liver.to(device)
                 labels_lesion = labels_lesion.to(device)
-
+                inputs = torch.cat([inputs, image_before, image_after],1)
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
+                    # with torch.no_grad():
+                    model_livel.eval()
                     outputs = model_livel(inputs)
-                    loss_liver = calc_loss(outputs[:,0:2,:,:], labels_liver, metrics_liver)
-                    input_to_lesion  = torch.zeros_like(outputs)
-                    input_to_lesion[:, 2: , :, :] = outputs[:, 2: , :, :].detach()
-                    input_to_lesion[:, 0: 2,:,:] = outputs[:, 0: 2,:,:].detach()
-                    outpus_lesion = model_lesion(torch.cat((inputs,input_to_lesion),dim=1))
-                    loss_lesion = calc_loss(outpus_lesion, labels_lesion, metrics_lesion)
-                    #loss_lesion = 0
+                    loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
+                    # loss_liver = 0
+                    #loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
+                    #loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
+                    # outpus_lesion = model_lesion(torch.cat((inputs,outputs),dim=1))
+                    # loss_lesion = calc_loss(outpus_lesion, labels_lesion, metrics_lesion)
+                    loss_lesion = 0
                     loss = loss_liver + loss_lesion
 
                     if (final_eval):
@@ -131,11 +145,11 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
                         vis(labels_liver[0],str(i) + "liver_label" + ".png")
 
 
-                        vis(outpus_lesion[0],str(i) + "lesion_ours_" + ".png")
+                        # vis(outpus_lesion[0],str(i) + "lesion_ours_" + ".png")
                         vis(labels_lesion[0],str(i) + "lesion_label" + ".png")
 
                         vis_seg(inputs[0], labels_liver[0], labels_lesion[0], str(i) + "_seg_label.png")
-                        vis_seg(inputs[0], outputs[0], outpus_lesion[0], str(i) + "_seg_ours.png")
+                        # vis_seg(inputs[0], outputs[0], outpus_lesion[0], str(i) + "_seg_ours.png")
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -154,20 +168,29 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
 
             print_metrics(metrics_liver, epoch_samples, phase)
             print_metrics(metrics_lesion, epoch_samples, phase)
-            epoch_loss = metrics_liver['loss'] / epoch_samples + metrics_lesion['dice'] / epoch_samples
+            metrics_liver['dice'] = 0 #todo patch
+            # epoch_loss = metrics_liver['loss'] / epoch_samples + metrics_lesion['dice'] / epoch_samples
+            epoch_loss = metrics_liver['loss'] / epoch_samples
 
 
+
+            with open(csv_path, 'a') as f:
+                f.write('{},{},{},{},{},{},{},{}\n'.format(epoch, phase, metrics_liver['dice']/epoch_samples,metrics_liver['loss']/epoch_samples,metrics_liver['bce']/epoch_samples,
+                                               metrics_lesion['dice']/epoch_samples,metrics_lesion['loss']/epoch_samples,metrics_lesion['bce']/epoch_samples))
 
             # deep copy the model
             if phase == 'val' and epoch_loss < best_loss and final_eval == False:
-                print("saving best model")
+
                 best_loss = epoch_loss
+                print("saving best model, best_loss: ", best_loss)
                 #best_model_wts = copy.deepcopy(model.state_dict())
                 torch.save({'state_dict': model_livel.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_liver_path)
                 torch.save({'state_dict': model_lesion.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_lesion_path)
 
                 torch.save({'state_dict': model_livel.state_dict()}, checkpoint_liver_path)
                 torch.save({'state_dict': model_lesion.state_dict()}, checkpoint_lesion_path)
+            elif(phase == 'val'):
+                print("curr result: " , epoch_loss , "best result: " , best_loss)
 
         time_elapsed = time.time() - since
         print('{:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -183,15 +206,24 @@ print(device)
 
 num_class = 2
 
-extra_channels_first_network = 3
-model_livel = unet.UNet(in_cannels=3, n_class=extra_channels_first_network+num_class).to(device)
-model_lesion = unet.UNet(in_cannels=extra_channels_first_network+5, n_class=num_class).to(device)
+#extra_channels_first_network = 3
+#model_livel = unet.UNet(in_cannels=3, n_class=extra_channels_first_network+num_class).to(device)
+#model_lesion = unet.UNet(in_cannels=extra_channels_first_network+5, n_class=num_class).to(device)
 
-checkpoint_liver = torch.load(checkpoint_liver_path)
-checkpoint_lesion = torch.load(checkpoint_lesion_path)
+# model_livel = R2AttU_Net(img_ch=3,output_ch=2).to(device)
+# model_lesion = R2AttU_Net(img_ch=5,output_ch=2).to(device)
 
-model_livel.load_state_dict(checkpoint_liver['state_dict'],strict=True)
-model_lesion.load_state_dict(checkpoint_lesion['state_dict'],strict=True)
+
+model_livel = AttU_Net(img_ch=9,output_ch=2).to(device)
+model_lesion = unet.UNet(in_cannels=11, n_class=num_class).to(device)
+#model_lesion = AttU_Net(img_ch=5,output_ch=2).to(device)
+
+
+# checkpoint_liver = torch.load(checkpoint_liver_path)
+#checkpoint_lesion = torch.load(checkpoint_lesion_path)
+
+# model_livel.load_state_dict(checkpoint_liver['state_dict'],strict=True)
+#model_lesion.load_state_dict(checkpoint_lesion['state_dict'],strict=True)
 
 # Observe that all parameters are being optimized
 optimizer_ft = optim.Adam(itertools.chain(model_lesion.parameters(), model_livel.parameters()), lr=1e-4)

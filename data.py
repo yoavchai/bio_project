@@ -54,16 +54,24 @@ class MyDataset(Dataset):
     def __getitem__(self, index):
 
         #img , target = self.X[index], self.Y[index]
-        img, target = np.asarray(PIL.Image.open(self.X[index])) , np.asarray(PIL.Image.open(self.Y[index]))
+        ind = min(index, self.__len__()-2)
+        ind = max(ind,1)
+        img, target = np.asarray(PIL.Image.open(self.X[ind])) , np.asarray(PIL.Image.open(self.Y[ind]))
+        try:
+            img_before, img_after = np.asarray(PIL.Image.open(self.X[ind-1])), np.asarray(PIL.Image.open(self.X[ind+1]))
+        except:
+            print ("Index:",    ind)
 
         img = np.transpose(img, (2, 0, 1))
+        img_before, img_after = np.transpose(img_before, (2, 0, 1)), np.transpose(img_after, (2, 0, 1))
         target = np.transpose(target, (2, 0, 1))
 
         img, target = self.to_tensor(img, target)
+        img_before, img_after = self.to_tensor(img_before, img_after)
 
         if (self.test == False):
-            img, target = self.tensor_rotate(img,target)
-            img, target = self.tensor_horizontal_flip(img,target)
+            img, target,img_before, img_after = self.tensor_rotate(img,target,img_before,img_after)
+            img, target,img_before, img_after = self.tensor_horizontal_flip(img,target, img_before, img_after)
             #img, target = self.horizontal_flip(img,target)
             #img, target = self.vertical_flip(img,target)
 
@@ -75,12 +83,16 @@ class MyDataset(Dataset):
 
         #normlize
         img = img / 255
+        img_before = img_before / 255
+        img_after  = img_after / 255
         img = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(img)
+        img_before = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(img_before)
+        img_after = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(img_after)
         #target = transforms.Normalize((0.5, 0.5, 0.5), (1, 1, 1))(target)
 
 
 
-        return img, target_liver , target_lesions
+        return img, target_liver , target_lesions, img_before, img_after
 
     # Override to give PyTorch size of dataset
     def __len__(self):

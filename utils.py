@@ -46,8 +46,6 @@ def save_seg_images(img, map, lesion_map, file_name):
     lesion_map = torch.unsqueeze(lesion_map, 2).repeat(1,1,4)
     lesion_map[:,:,0] = 0
     lesion_map[:,:,2] = 0
-
-
     plt.figure()
     plt.imshow(((img+1)/2).permute(1,2,0).cpu(), interpolation='none')
     plt.imshow(map.cpu())
@@ -89,7 +87,7 @@ class JointVerticalFlip(object):
 class TensorJointHorizontalFlip(object):
     """Horizontally flip the given pair of PIL Images randomly with a probability of 0.5."""
 
-    def __call__(self, img, target):
+    def __call__(self, img, target, img_before, img_after):
         """
         Args:
             img (PIL Image): Image to be flipped.
@@ -99,14 +97,14 @@ class TensorJointHorizontalFlip(object):
             PIL Image, PIL Image: Randomly flipped images.
         """
         if random.random() < 0.5:
-            return img.flip(2).clone() ,  target.flip(2).clone() # img[:,:,::-1].copy(), target[:,:,::-1].copy() #F.hflip(img), F.hflip(target)
-        return img, target
+            return img.flip(2).clone() ,  target.flip(2).clone(), img_before.flip(2).clone(), img_after.flip(2).clone() # img[:,:,::-1].copy(), target[:,:,::-1].copy() #F.hflip(img), F.hflip(target)
+        return img, target, img_before, img_after
 
 
 class TensorJointRotate(object):
     """Horizontally flip the given pair of PIL Images randomly with a probability of 0.5."""
 
-    def __call__(self, img, target):
+    def __call__(self, img, target, img_before, img_after):
         """
         Args:
             img (PIL Image): Image to be flipped.
@@ -117,13 +115,13 @@ class TensorJointRotate(object):
         """
         random_value = random.random()
         if random_value < 0.25: #no change
-            return img, target
+            return img, target, img_before, img_after
         elif random_value < 0.5: #90 degress
-            return img.clone().transpose(1, 2)  , target.clone().transpose(1, 2)
+            return img.clone().transpose(1, 2)  , target.clone().transpose(1, 2), img_before.clone().transpose(1, 2), img_after.clone().transpose(1, 2)
         elif random_value < 0.75: # 180 degress
-            return img.flip(1).clone(), target.flip(1).clone()
+            return img.clone().flip(1), target.clone().flip(1), img_before.clone().flip(1), img_after.clone().flip(1)
         else: #270 degress
-            return img.clone().transpose(1, 2).flip(2)  , target.clone().transpose(1, 2).flip(2)
+            return img.clone().transpose(1, 2).flip(2)  , target.clone().transpose(1, 2).flip(2), img_before.clone().transpose(1, 2).flip(2), img_after.clone().transpose(1, 2).flip(2)
 
 class JointNormailze(object):
     """Normalize a tensor image with mean and standard deviation. Given mean: (M1,...,Mn) and std: (S1,..,Sn) for n channels,
