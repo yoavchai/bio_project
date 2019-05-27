@@ -129,11 +129,11 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     # with torch.no_grad():
-                    model_livel.eval()
+                    # model_livel.eval()
                     outputs = model_livel(inputs)
-                    loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
+                    # loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
                     # loss_liver = 0
-                    #loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
+                    loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
                     #loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
                     # outpus_lesion = model_lesion(torch.cat((inputs,outputs),dim=1))
                     # loss_lesion = calc_loss(outpus_lesion, labels_lesion, metrics_lesion)
@@ -219,11 +219,11 @@ model_lesion = unet.UNet(in_cannels=11, n_class=num_class).to(device)
 #model_lesion = AttU_Net(img_ch=5,output_ch=2).to(device)
 
 
-# checkpoint_liver = torch.load(checkpoint_liver_path)
-#checkpoint_lesion = torch.load(checkpoint_lesion_path)
+checkpoint_liver = torch.load(checkpoint_liver_path)
+checkpoint_lesion = torch.load(checkpoint_lesion_path)
 
-# model_livel.load_state_dict(checkpoint_liver['state_dict'],strict=True)
-#model_lesion.load_state_dict(checkpoint_lesion['state_dict'],strict=True)
+model_livel.load_state_dict(checkpoint_liver['state_dict'],strict=True)
+model_lesion.load_state_dict(checkpoint_lesion['state_dict'],strict=True)
 
 # Observe that all parameters are being optimized
 optimizer_ft = optim.Adam(itertools.chain(model_lesion.parameters(), model_livel.parameters()), lr=1e-4)

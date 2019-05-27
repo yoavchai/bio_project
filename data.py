@@ -56,11 +56,24 @@ class MyDataset(Dataset):
         #img , target = self.X[index], self.Y[index]
         ind = min(index, self.__len__()-2)
         ind = max(ind,1)
+        # Make sure taking the pictures of same patient
+        p_number = self.Y[ind].split('/')[-1].split('_')[1]
+        after_p_number = self.Y[ind+1].split('/')[-1].split('_')[1]
+        before_p_number = self.Y[ind - 1].split('/')[-1].split('_')[1]
+        if p_number != after_p_number:
+            ind -= 1
+        elif p_number != before_p_number:
+            ind += 1
+        p_number = self.Y[ind].split('/')[-1].split('_')[1]
+        after_p_number = self.Y[ind + 1].split('/')[-1].split('_')[1]
+        before_p_number = self.Y[ind - 1].split('/')[-1].split('_')[1]
+        assert (p_number == after_p_number)
+        assert (p_number == before_p_number)
         img, target = np.asarray(PIL.Image.open(self.X[ind])) , np.asarray(PIL.Image.open(self.Y[ind]))
         try:
             img_before, img_after = np.asarray(PIL.Image.open(self.X[ind-1])), np.asarray(PIL.Image.open(self.X[ind+1]))
         except:
-            print ("Index:",    ind)
+            print ("Index:", ind)
 
         img = np.transpose(img, (2, 0, 1))
         img_before, img_after = np.transpose(img_before, (2, 0, 1)), np.transpose(img_after, (2, 0, 1))
