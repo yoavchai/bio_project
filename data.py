@@ -91,8 +91,8 @@ class MyDataset(Dataset):
 
 
         target = target[0,:,:] #all channels should be the same
-        target_liver = torch.stack(((target == 0), (target > 0))).to(dtype=torch.float32)
-        target_lesions = torch.stack(((target <= 129), (target > 129))).to(dtype=torch.float32)
+        target = torch.stack(((target == 0), (target == 127) , (target == 255))).to(dtype=torch.float32)
+        #target_lesions = torch.stack(((target <= 129), (target > 129))).to(dtype=torch.float32)
 
         #normlize
         img = img / 255
@@ -105,7 +105,7 @@ class MyDataset(Dataset):
 
 
 
-        return img, target_liver , target_lesions, img_before, img_after
+        return img, target , img_before, img_after
 
     # Override to give PyTorch size of dataset
     def __len__(self):

@@ -4,8 +4,6 @@
 import torch
 import torch.nn as nn
 import unet
-# import unet_stn as unet
-# import unet_deep as unet
 from collections import defaultdict
 import torch.nn.functional as F
 from loss import dice_loss
@@ -25,6 +23,8 @@ from utils import save_images, save_seg_images
 import itertools
 from networks import R2AttU_Net , AttU_Net
 import os
+import matplotlib.pyplot as plt
+
 
 from torch.backends import cudnn
 cudnn.benchmark = True
@@ -38,25 +38,32 @@ parser = argparse.ArgumentParser(description='TODO')
 #parser.add_argument('--seed', default=0, type=int, metavar='N', help='random seed')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
 parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train.')
-parser.add_argument('--batch_size', type=int, default=2, help='Number of epochs to train.')
+parser.add_argument('--batch_size', type=int, default=4, help='Number of epochs to train.')
 #parser.add_argument('--learning_rate', '-lr', type=float, default=5e-5, help='The learning rate.')
 #parser.add_argument('--check_point_path', type=str, default=checkpoint_path, help='Path to checkpoint file')
 parser.add_argument('--load_model', type=lambda x: (str(x).lower() == 'true'), default=True, help='use pretrained')
+parser.add_argument('--train_mode', type=str, default='train_liver', help='options are train_liver/train_lesion/test')
 
 args = parser.parse_args()
+
+
+if args.train_mode not in ['train_liver','train_lesion','test']:
+    AssertionError()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def calc_loss(pred, target, metrics, bce_weight=0.5):
+    #bce = 0
     bce = F.binary_cross_entropy_with_logits(pred, target)
 
     pred = torch.sigmoid(pred) #TODO why it is not softmax??
-    dice = dice_loss(pred, target)
+    #pred = torch.softmax(pred,dim=1)  # TODO why it is not softmax??
+    dice = dice_loss(pred, target, metrics)
 
     loss = bce * bce_weight + dice * (1 - bce_weight)
 
     metrics['bce'] += bce.data.cpu().numpy() * target.size(0)
-    metrics['dice'] += dice_loss(pred, target,binary=True).data.cpu().numpy() * target.size(0)
+    # metrics['dice'] += dice_loss(pred, target,binary=True).data.cpu().numpy() * target.size(0)
     metrics['loss'] += loss.data.cpu().numpy() * target.size(0)
 
     #TODO check it is good
@@ -70,16 +77,34 @@ def calc_loss(pred, target, metrics, bce_weight=0.5):
 def print_metrics(metrics, epoch_samples, phase):
     outputs = []
     for k in metrics.keys():
-        outputs.append("{}: {:4f}".format(k, metrics[k] / epoch_samples))
+        if k == 'lesion_recall':
+            outputs.append("{}: {:4f}".format(k, metrics[k] / metrics['lesion_recall_samples']))
+        elif k =='lesion_precision':
+            outputs.append("{}: {:4f}".format(k, metrics[k] / metrics['lesion_precision_samples']))
+        else:
+            outputs.append("{}: {:4f}".format(k, metrics[k] / epoch_samples))
 
     print("{}: {}".format(phase, ", ".join(outputs)))
 
 
+def save_depth_maps(pred,file_name):
+    threshold = -0.1
+    # map = (pred[1] + threshold  > pred[0]).to(dtype=torch.float32) #TODO use global threshold
+    # save_images(map.unsqueeze(0),file_name)
+    pred_argmax = torch.argmax(pred, 1).float()
+    depth_map = torch.floor(127.5*pred_argmax).long()
+    image_dir = './result/depth_maps'
+    if not os.path.isdir(image_dir):
+        os.makedirs(image_dir)
+    for i, img in enumerate(depth_map):
+        plt.imsave(os.path.join(image_dir, file_name.replace('.png', '_'+str(i)+'.png')), img.cpu())
+
 #need to input one image
 def vis(pred,file_name):
     threshold = -0.1
-    map = (pred[1] + threshold  > pred[0]).to(dtype=torch.float32) #TODO use global threshold
-    save_images(map.unsqueeze(0),file_name)
+    # map = (pred[1] + threshold  > pred[0]).to(dtype=torch.float32) #TODO use global threshold
+    # save_images(map.unsqueeze(0),file_name)
+    save_images(pred.unsqueeze(0),file_name)
 
 def vis_seg(input, pred, pred_lesion,file_name):
     threshold = -0.1
@@ -115,12 +140,12 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
             metrics_lesion = defaultdict(float)
             epoch_samples = 0
 
-            for i, (inputs, labels_liver,labels_lesion, image_before, image_after) in enumerate( dataloaders[phase]):
+            for i, (inputs, labels, image_before, image_after) in enumerate( dataloaders[phase]):
                 inputs = inputs.to(device)
                 image_before = image_before.to(device)
                 image_after = image_after.to(device)
-                labels_liver = labels_liver.to(device)
-                labels_lesion = labels_lesion.to(device)
+                labels = labels.to(device)
+                #labels_lesion = labels_lesion.to(device)
                 inputs = torch.cat([inputs, image_before, image_after],1)
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -128,28 +153,40 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    # with torch.no_grad():
-                    # model_livel.eval()
-                    outputs = model_livel(inputs)
-                    # loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
-                    # loss_liver = 0
-                    loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
-                    #loss_liver = calc_loss(outputs, labels_liver, metrics_liver)
-                    # outpus_lesion = model_lesion(torch.cat((inputs,outputs),dim=1))
-                    # loss_lesion = calc_loss(outpus_lesion, labels_lesion, metrics_lesion)
+                    if args.train_mode in ['train_lesion','test']:
+                        with torch.no_grad():
+                            model_livel.eval()
+                            outputs = model_livel(inputs)
+                            loss_liver = calc_loss(outputs, labels, metrics_liver) #to update metrics_liver
+                            #loss_liver = 0
+                    else:
+                        outputs = model_livel(inputs)
+                        loss_liver = calc_loss(outputs, labels, metrics_liver)
+
+                    # if args.train_mode in ['train_lesion', 'test']:
+                    #     #outpus_lesion = model_lesion(torch.cat((inputs,outputs),dim=1))
+                    #     outpus_lesion = model_lesion(inputs)
+                    #     loss_lesion = calc_loss(outpus_lesion, labels, metrics_lesion)
+                    # else:
                     loss_lesion = 0
+                    metrics_lesion['dice'] = 0
+                    metrics_lesion['bce'] = 0
+                    metrics_lesion['loss'] = 0
+
                     loss = loss_liver + loss_lesion
 
                     if (final_eval):
-                        vis(outputs[0],str(i) + "liver_ours_" + ".png")
-                        vis(labels_liver[0],str(i) + "liver_label" + ".png")
+                        save_depth_maps(outputs, str(i) + "_depth_map.png")
+
+                        vis(outputs[0,1,:,:],str(i) + "_liver_ours" + ".png")
+                        vis(labels[0,1,:,:],str(i) + "_liver_label" + ".png")
 
 
-                        # vis(outpus_lesion[0],str(i) + "lesion_ours_" + ".png")
-                        vis(labels_lesion[0],str(i) + "lesion_label" + ".png")
+                        vis(outputs[0,2,:,:],str(i) + "_lesion_ours" + ".png")
+                        vis(labels[0,2,:,:],str(i) + "_lesion_label" + ".png")
 
-                        vis_seg(inputs[0], labels_liver[0], labels_lesion[0], str(i) + "_seg_label.png")
-                        # vis_seg(inputs[0], outputs[0], outpus_lesion[0], str(i) + "_seg_ours.png")
+                        # vis_seg(inputs[0, :3,:,:], labels[0,1,:,:], labels[0,2,:,:], str(i) + "_seg_label.png")
+                        # vis_seg(inputs[0, :3,:,:], outputs[0,1,:,:], outputs[0,2,:,:], str(i) + "_seg_ours.png")
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -168,10 +205,13 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
 
             print_metrics(metrics_liver, epoch_samples, phase)
             print_metrics(metrics_lesion, epoch_samples, phase)
-            metrics_liver['dice'] = 0 #todo patch
-            # epoch_loss = metrics_liver['loss'] / epoch_samples + metrics_lesion['dice'] / epoch_samples
-            epoch_loss = metrics_liver['loss'] / epoch_samples
 
+            if args.train_mode in ['train_liver']:
+                epoch_loss = metrics_liver['dice'] / epoch_samples
+            elif args.train_mode in ['train_lesion']:
+                epoch_loss = metrics_lesion['dice'] / epoch_samples
+            else:
+                epoch_loss = 0
 
 
             with open(csv_path, 'a') as f:
@@ -183,7 +223,6 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
 
                 best_loss = epoch_loss
                 print("saving best model, best_loss: ", best_loss)
-                #best_model_wts = copy.deepcopy(model.state_dict())
                 torch.save({'state_dict': model_livel.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_liver_path)
                 torch.save({'state_dict': model_lesion.state_dict(), 'epoch': epoch, 'optim': optimizer}, checkpoint_lesion_path)
 
@@ -196,9 +235,7 @@ def train_model(model_livel,model_lesion, optimizer, scheduler, dataloaders,requ
         print('{:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val loss: {:4f}'.format(best_loss))
 
-    # load best model weights
-    #model.load_state_dict(best_model_wts)
-    #return model
+
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -214,21 +251,29 @@ num_class = 2
 # model_lesion = R2AttU_Net(img_ch=5,output_ch=2).to(device)
 
 
-model_livel = AttU_Net(img_ch=9,output_ch=2).to(device)
-model_lesion = unet.UNet(in_cannels=11, n_class=num_class).to(device)
+model_livel = AttU_Net(img_ch=9,output_ch=3).to(device)
+if args.train_mode in ['train_lesion' , 'test']:
+    #model_lesion = unet.UNet(in_cannels=11, n_class=num_class).to(device)
+    model_lesion = AttU_Net(img_ch=9, output_ch=3).to(device)
+else:
+    model_lesion = model_livel #kind of patch
 #model_lesion = AttU_Net(img_ch=5,output_ch=2).to(device)
 
+if args.train_mode in ['train_lesion' , 'test']:
+    checkpoint_liver = torch.load(checkpoint_liver_path)
+    model_livel.load_state_dict(checkpoint_liver['state_dict'], strict=True)
 
-checkpoint_liver = torch.load(checkpoint_liver_path)
-checkpoint_lesion = torch.load(checkpoint_lesion_path)
-
-model_livel.load_state_dict(checkpoint_liver['state_dict'],strict=True)
-model_lesion.load_state_dict(checkpoint_lesion['state_dict'],strict=True)
+    if args.train_mode == 'test':
+        checkpoint_lesion = torch.load(checkpoint_lesion_path)
+        model_lesion.load_state_dict(checkpoint_lesion['state_dict'],strict=True)
 
 # Observe that all parameters are being optimized
-optimizer_ft = optim.Adam(itertools.chain(model_lesion.parameters(), model_livel.parameters()), lr=1e-4)
+if args.train_mode in ['train_lesion' , 'test']:
+    optimizer_ft = optim.Adam(itertools.chain(model_lesion.parameters(), model_livel.parameters()), lr=1e-4)
+else:
+    optimizer_ft = optim.Adam(itertools.chain( model_livel.parameters()), lr=1e-4)
 
-exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=25, gamma=0.1)
+exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=50, gamma=0.1) #TODO
 
 
 input_train_list = sorted( glob.glob(os.path.join('data','ct','train') + '/*.png') )
@@ -249,11 +294,12 @@ dataloaders['train'] = train_loader
 dataloaders['val'] = val_loader
 
 #train
-required_phanes = ['train', 'val']
-if (args.start_epoch< args.epochs):
-    train_model(model_livel,model_lesion, optimizer_ft, exp_lr_scheduler, dataloaders , required_phanes ,num_epochs=args.epochs - args.start_epoch)
-
-required_phanes = ['val']
-train_model(model_livel,model_lesion, optimizer_ft, exp_lr_scheduler, dataloaders ,required_phanes, num_epochs=1,final_eval = True)
+if args.train_mode in ['train_lesion' , 'train_liver']:
+    required_phanes = ['train', 'val']
+    if (args.start_epoch< args.epochs):
+        train_model(model_livel,model_lesion, optimizer_ft, exp_lr_scheduler, dataloaders , required_phanes ,num_epochs=args.epochs - args.start_epoch)
+else:
+    required_phanes = ['val']
+    train_model(model_livel,model_lesion, optimizer_ft, exp_lr_scheduler, dataloaders ,required_phanes, num_epochs=1,final_eval = True)
 
 

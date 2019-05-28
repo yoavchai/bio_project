@@ -2,13 +2,18 @@ import torch
 import torch.nn as nn
 
 
-def double_conv(in_channels, out_channels):
-    return nn.Sequential(
+def double_conv(in_channels, out_channels,use_dropout=False):
+    layers = [
         nn.Conv2d(in_channels, out_channels, 3, padding=1),
         nn.ReLU(inplace=True),
         nn.Conv2d(out_channels, out_channels, 3, padding=1),
         nn.ReLU(inplace=True)
-    )
+    ]
+
+    if use_dropout:
+        layers.append(nn.Dropout2d(p=0.1))
+
+    return nn.Sequential(*layers)
 
 
 class UNet(nn.Module):
@@ -18,8 +23,8 @@ class UNet(nn.Module):
 
         self.dconv_down1 = double_conv(in_cannels, 64)
         self.dconv_down2 = double_conv(64, 128)
-        self.dconv_down3 = double_conv(128, 256)
-        self.dconv_down4 = double_conv(256, 512)
+        self.dconv_down3 = double_conv(128, 256,use_dropout=True)
+        self.dconv_down4 = double_conv(256, 512,use_dropout=True)
 
         self.maxpool = nn.MaxPool2d(2)
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
